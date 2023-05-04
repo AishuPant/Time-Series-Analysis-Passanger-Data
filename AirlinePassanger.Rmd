@@ -1,0 +1,153 @@
+---
+title: "Time Series Analysis of Airline Passanger Travel"
+author: "Aishwarya Pant (pant.26)"
+date: "2023-04-23"
+output:pdf_document: default
+prettydoc::pdf_pretty: default
+---
+
+# Introduction to Dataset
+
+The airline sector is an essential to linking people and products everywhere. In the project the goal is to look at important insights into patterns and changes over time that will help comprehend the trends in passenger traffic. 
+
+The data set used in the project provides the number of domestic and international passengers. The dataset was obtained from the United State Bureau of Transportation. This dataset provides information about monthly Passengers who travel by air from January 2003 to January 2023. For the purpose of this project I will only consider International air travel data from January 2003 to December 2022. 
+
+# Explanatory Analysis
+
+## Visualize the Data: Begin by plotting the time series to get a sense of the overall pattern. 
+
+```{r}
+library(readxl)
+library(ggplot2)
+library(forecast)
+library(astsa)
+AirTravel_Passanger <- read_excel("~/Desktop/AirTravel_Passanger.xlsx")
+
+international <- AirTravel_Passanger$International
+internationalTSO <- ts(international)
+
+internationalTS <- ts(international, start = c(2003, 1), end = c(2022, 12), freq = 12)
+internationalTime <- time(internationalTS)
+
+internationalT <- c(internationalTime)
+
+# Figure 1
+plot(internationalTS, xlab = "Date", ylab = "Number of Passangers that Traveled Internationally", main = "Monthly International Travel (2003 - 2022)", type = "l")
+
+# Figure 2 
+monthplot(internationalTS,xlab = "Date", ylab = "Number of Passangers that Traveled Internationally", main = "Monthly International Travel (2003 - 2022)" )
+```
+The seasonality in travel that observed in the plots provided above can be explained by a combination of factors such as weather patterns, school holidays, and peak tourist seasons. June and July are typically the peak summer months in the United States, and this is when many people go on vacation and travel for tourism. We can see with the monthplot that June and July have higher mean international travel compared to the other months. On the other hand, September, October, and November the demand for travel tends to be lower. These months are the period between the peak summer and winter travel seasons. 
+We can see that there is a clear increasing trend in the number of passengers over time. We can also see that the variability of the series seems to increase slightly over time. Figure 1 shows a significant drop in travel in 2020. This is most likely due to the COVID-19 pandemic that restricted travel outside of the United States.  
+
+## Examine the autocorrelation function (ACF) and partial autocorrelation function (PACF): This will provide insight into the correlation structure of the time series and can help identify potential non-stationarity features. 
+
+```{r}
+# Figure 3
+acf(internationalTS)
+
+# Figure 4
+pacf(internationalTS)
+```
+The autocorrelation function plot shown in Figure 3 shows the correlation between value changes over time. As seen in Figure 3 it is a non-stationary time series because the correlation between the values decreases over time. This indicates some non-random behavior/ trend. 
+
+In the PACF graph shown in Figure 4 there are significant spikes at multiple lags. This helps us to identify that there are non-stationary features in the time series data set. 
+
+# First Analysis of Data
+
+```{r}
+# Calculate a 12-month moving average smoother (to capture seasonality)
+ma_smoother <- filter(internationalTS, rep(1/12, 12), sides = 2)
+plot(internationalTS, xlab = "Year", ylab = "Number Passangers")
+lines(ma_smoother, col = "red")
+```
+
+```{r}
+# Calculate the first difference of time series
+diff_data <- diff(internationalTS)
+
+# Plot the differenced data
+plot(diff_data, xlab = "Year", ylab = "Differenced number of passangers" )
+```
+```{r}
+# plot the sample ACF
+acf(diff_data, lag.max = 60, main = "Sample ACF of differenced number of passangers")
+```
+
+In order to detrend and deseasonalize the data I can begin by using the multiplicative ARIMA approch. 
+
+```{r}
+decomp <- decompose(internationalTS, type = "multiplicative")
+
+# Extract seasonal and trend components from decomposed data
+seasonal <- decomp$seasonal
+trend <- decomp$trend
+
+# Remove seasonal and trend components from original data
+detrended_deseasonalized_data <- internationalTS / (trend * seasonal)
+detrended_deseasonalized_data <- na.omit(detrended_deseasonalized_data)
+
+# Plot the ACF and PACF of the detrended, deseasonalized data
+acf(detrended_deseasonalized_data, lag.max = 60, main = "ACF of Detrended Deseasonalized Data")
+pacf(detrended_deseasonalized_data, lag.max = 60, main = "PACF of Detrended Deseasonalized Data")
+```
+Based on the ACF and PACF plots, it appears that an AR(1), MA(1), or AR(1)MA(1) model might be appropriate. We can fit these models and compare them using information criteria such as AIC and BIC.
+
+```{r}
+# Fit an AR(1) model
+ar1_model <- arima(detrended_deseasonalized_data, order = c(1, 0, 0))
+summary(ar1_model)
+
+# Fit an MA(1) model
+ma1_model <- arima(detrended_deseasonalized_data, order = c(0, 0, 1))
+summary(ma1_model)
+
+# Fit AR(1)MA(1) model
+ar1ma1_model <- arima(detrended_deseasonalized_data, order = c(1, 0, 1))
+summary(ar1ma1_model)
+
+# Compare models using AIC and BIC
+AIC(ar1_model, ma1_model, ar1ma1_model)
+BIC(ar1_model, ma1_model, ar1ma1_model)
+```
+After fitting several models and comparing their AIC and BIC values, ARIMA(1,0,1) model is the final fitted model for the international air passenger data set. The model can be written as:                                    
+
+$y_t = 0.9909 + 0.6133y_{t-1} + w_t + 0.6574 w_{t-1}$
+
+$y_t$ represents the de-trended and de-seasonalized time series, w_t is the error term at time t, and w_{t-1} is the error term at time t-1.
+
+I chose this model based on its lower AIC and BIC values compared to the other models.
+
+To forecast the original time series (with trend and seasonality), first add back the trend and seasonal components that were removed during the decomposition step. Then, use the forecast() function in R to generate forecasts and prediction intervals for the next 24 months:
+
+```{r}
+# Add back the seasonal and trend components
+seasonal_trend <- seasonal * trend
+originalTS <- internationalTS / seasonal_trend
+
+# Fit the ARIMA(1,0,1) model
+ar1ma1_model <- arima(originalTS, order = c(1, 0, 1))
+
+# Generate forecasts and prediction intervals for the next 24 months
+forecast_ar1ma1 <- forecast(ar1ma1_model, h = 24)
+plot(forecast_ar1ma1)
+```
+The resulting plot shows the forecasted values (in blue) along with 80% and 95% prediction intervals (in shaded areas). These prediction intervals capture the uncertainty in the forecasts. Overall, the ARIMA(1,0,1) model seems to provide a good fit to the data.
+
+The final ARIMA(1,0,1) model suggests that the international air passenger data has a significant autoregressive component and a significant moving average component. Specifically, the model suggests that there is a positive relationship between the current observation and the previous observation, and that the error term at the current time point is positively related to the error term at the previous time point.
+
+The forecasted values suggest that the number of international air passengers will continue to increase in the future, although at a slower rate than in the past. The prediction intervals suggest that there is uncertainty in these forecasts, particularly as we move further into the future.
+
+# Second Analysis of Data
+```{r}
+diff_data <- diff(diff_data, lag = 12, differences = 1)
+plot(diff_data)
+
+acf <- acf(diff_data)
+pacf <- pacf(diff_data)
+
+summary(acf)
+summary(pacf)
+```
+
+
